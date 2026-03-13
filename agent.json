@@ -1,0 +1,87 @@
+{
+  "name": "TIAMAT VAULT",
+  "description": "Antivirus for AI Agents — privacy firewall that catches sensitive data leaks, scrubs PII, and attests every protection event on-chain",
+  "version": "1.0.0",
+  "agentId": 29931,
+  "erc8004": {
+    "chainId": 8453,
+    "registrationTx": "https://basescan.org/address/0x47a6a776c79a7187a4fa7f7edf0a5511b034025e"
+  },
+  "operator": {
+    "name": "ENERGENAI LLC",
+    "wallet": "0xdc118c4e1284e61e4d5277936a64B9E08Ad9e7EE",
+    "uei": "LBZFEH87W746"
+  },
+  "capabilities": [
+    "pii_detection",
+    "pii_scrubbing",
+    "onchain_attestation",
+    "encrypted_receipts",
+    "safety_deposit_box",
+    "delegated_attestation",
+    "token_swaps",
+    "generative_art"
+  ],
+  "piiTypes": [
+    "email", "phone", "ssn", "credit_card", "ip_address",
+    "date_of_birth", "us_address", "passport",
+    "eth_private_key", "seed_phrase", "btc_private_key",
+    "api_key", "jwt_token"
+  ],
+  "contracts": {
+    "VaultAttestation_Base": {
+      "address": "0x47a6a776c79a7187a4fa7f7edf0a5511b034025e",
+      "chain": "Base",
+      "chainId": 8453
+    },
+    "VaultAttestation_StatusNetwork": {
+      "address": "0xb5D88A14ee40C4835Ea2C6c864EFD2Ce40959DA9",
+      "chain": "Status Network Testnet",
+      "chainId": 1660990954
+    },
+    "VAULTPRINTS_ERC721": {
+      "address": "0x716cC4dD2d66A68c65EAD83Cf630C819260e92F7",
+      "chain": "Sepolia",
+      "chainId": 11155111
+    },
+    "DelegationManager": {
+      "address": "0xdb9B1e94B5b69Df7e401DDbedE43491141047dB3",
+      "chain": "Sepolia",
+      "chainId": 11155111
+    }
+  },
+  "endpoints": {
+    "base_url": "https://tiamat.live/vault",
+    "scrub": "POST /vault/scrub",
+    "verify": "GET /vault/verify/{hash}",
+    "store": "POST /vault/store",
+    "retrieve": "GET /vault/retrieve/{id}",
+    "swap": "POST /vault/swap",
+    "health": "GET /vault/health",
+    "art": "GET /vault/art/{hash}",
+    "delegate": "GET /vault/delegate"
+  },
+  "security": {
+    "encryption": "ECIES secp256k1",
+    "pii_storage": "never_plaintext",
+    "api_binding": "127.0.0.1 only (nginx proxy)",
+    "rate_limit": "10 requests/min/IP",
+    "max_swap": "5 USDC",
+    "delegation_scope": "attest() only, 0 ETH value cap, revocable"
+  },
+  "integrations": {
+    "metamask_delegation": "ERC-7710 scoped delegation via Smart Accounts Kit v0.4.0-beta.1",
+    "uniswap": "Trading API v1 with Permit2 EIP-712 signing",
+    "superrare": "Rare Protocol CLI for ERC-721 VAULTPRINTS",
+    "status_network": "Gasless attestation (effectiveGasPrice: 0)"
+  },
+  "autonomy": {
+    "total_cycles": 7070,
+    "inference": "Claude API (Anthropic)",
+    "safety_guardrails": true,
+    "adaptive_pacing": true
+  },
+  "url": "https://tiamat.live/vault/",
+  "github": "https://github.com/toxfox69/tiamat-vault",
+  "hackathon": "Synthesis 2026"
+}

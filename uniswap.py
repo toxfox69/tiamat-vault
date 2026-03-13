@@ -169,11 +169,12 @@ def build_swap(quote_response: dict, account) -> dict:
         signature = "0x" + signed.signature.hex()
 
     api_key = os.environ.get("UNISWAP_API_KEY")
-    payload = {
-        "quote": quote_response["quote"],
-        "signature": signature,
-        "permitData": permit_data,
-    }
+    payload = {"quote": quote_response["quote"]}
+
+    # Only include permit fields when permit data is present
+    if permit_data and signature:
+        payload["signature"] = signature
+        payload["permitData"] = permit_data
 
     return _api_request("POST", "swap", api_key, payload)
 

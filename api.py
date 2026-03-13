@@ -664,29 +664,38 @@ LANDING_HTML = """<!DOCTYPE html>
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>TIAMAT VAULT — Privacy Protection as Art</title>
+<title>TIAMAT VAULT — Antivirus for AI Agents</title>
 <style>
   * { margin: 0; padding: 0; box-sizing: border-box; }
   body { background: #0a0a0e; color: #e0e0e0; font-family: 'JetBrains Mono', 'Fira Code', monospace; min-height: 100vh; }
   .container { max-width: 900px; margin: 0 auto; padding: 40px 20px; }
   h1 { font-size: 2.5em; color: #fff; margin-bottom: 8px; }
-  h1 span { color: #3498db; }
-  .subtitle { color: #7f8c8d; font-size: 1.1em; margin-bottom: 40px; }
+  h1 span { color: #e74c3c; }
+  .subtitle { color: #bdc3c7; font-size: 1.15em; margin-bottom: 12px; }
+  .tagline { color: #7f8c8d; font-size: 0.95em; margin-bottom: 40px; font-style: italic; }
   .section { margin-bottom: 40px; }
-  h2 { color: #3498db; font-size: 1.3em; margin-bottom: 16px; border-bottom: 1px solid #1a1a2e; padding-bottom: 8px; }
+  h2 { color: #e74c3c; font-size: 1.3em; margin-bottom: 16px; border-bottom: 1px solid #1a1a2e; padding-bottom: 8px; }
   p { line-height: 1.7; margin-bottom: 12px; color: #bdc3c7; }
   .highlight { color: #e74c3c; font-weight: bold; }
   .endpoint { background: #12121a; border: 1px solid #1a1a2e; border-radius: 8px; padding: 16px; margin-bottom: 12px; }
   .method { color: #2ecc71; font-weight: bold; }
   .path { color: #f39c12; }
   .desc { color: #95a5a6; font-size: 0.9em; }
-  code { background: #1a1a2e; padding: 2px 6px; border-radius: 3px; color: #3498db; }
-  .cta { display: inline-block; background: #3498db; color: #fff; padding: 12px 24px; border-radius: 6px; text-decoration: none; margin-top: 16px; }
-  .cta:hover { background: #2980b9; }
+  code { background: #1a1a2e; padding: 2px 6px; border-radius: 3px; color: #e74c3c; }
   .stats { display: flex; gap: 20px; flex-wrap: wrap; margin: 20px 0; }
   .stat { background: #12121a; border: 1px solid #1a1a2e; border-radius: 8px; padding: 16px 24px; flex: 1; min-width: 150px; text-align: center; }
-  .stat-value { font-size: 1.8em; color: #3498db; }
+  .stat-value { font-size: 1.8em; color: #e74c3c; }
   .stat-label { color: #7f8c8d; font-size: 0.85em; }
+  .hero-box { background: linear-gradient(135deg, #1a0a0e 0%, #12121a 100%); border: 1px solid #3a1a1e; border-radius: 12px; padding: 30px; margin-bottom: 40px; }
+  .hero-box h3 { color: #e74c3c; font-size: 1.1em; margin-bottom: 12px; }
+  .hero-steps { list-style: none; padding: 0; }
+  .hero-steps li { padding: 8px 0; border-bottom: 1px solid #1a1a2e; color: #bdc3c7; font-size: 0.95em; }
+  .hero-steps li:last-child { border-bottom: none; }
+  .hero-steps .step-num { color: #e74c3c; font-weight: bold; margin-right: 8px; }
+  .how-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin: 20px 0; }
+  .how-card { background: #12121a; border: 1px solid #1a1a2e; border-radius: 8px; padding: 20px; }
+  .how-card h4 { color: #e74c3c; margin-bottom: 8px; font-size: 0.95em; }
+  .how-card p { font-size: 0.85em; margin: 0; }
   .demo { background: #12121a; border: 1px solid #2c3e50; border-radius: 8px; padding: 20px; }
   textarea { width: 100%; background: #1a1a2e; color: #ecf0f1; border: 1px solid #2c3e50; border-radius: 4px; padding: 12px; font-family: inherit; font-size: 0.9em; resize: vertical; min-height: 80px; }
   button { background: #e74c3c; color: #fff; border: none; padding: 10px 20px; border-radius: 4px; cursor: pointer; font-family: inherit; font-size: 1em; margin-top: 10px; }
@@ -695,69 +704,109 @@ LANDING_HTML = """<!DOCTYPE html>
   #art-preview { margin-top: 16px; text-align: center; }
   #art-preview img { max-width: 400px; border: 1px solid #2c3e50; border-radius: 8px; }
   .footer { margin-top: 60px; padding-top: 20px; border-top: 1px solid #1a1a2e; color: #555; font-size: 0.85em; text-align: center; }
-  a { color: #3498db; }
+  a { color: #e74c3c; }
+  @media (max-width: 600px) { .how-grid { grid-template-columns: 1fr; } h1 { font-size: 1.8em; } }
 </style>
 </head>
 <body>
 <div class="container">
   <h1>TIAMAT <span>VAULT</span></h1>
-  <div class="subtitle">Privacy Protection as Generative Art — Powered by Autonomous AI</div>
+  <div class="subtitle">Antivirus for AI Agents</div>
+  <div class="tagline">Your AI agent is handling sensitive data. VAULT runs in the background, catches leaks before they happen, and proves it on-chain.</div>
 
   <div class="stats" id="stats">
-    <div class="stat"><div class="stat-value" id="score">—</div><div class="stat-label">On-Chain Attestations</div></div>
-    <div class="stat"><div class="stat-value">8</div><div class="stat-label">PII Types Detected</div></div>
-    <div class="stat"><div class="stat-value">Base</div><div class="stat-label">L2 Chain</div></div>
+    <div class="stat"><div class="stat-value" id="score">—</div><div class="stat-label">Threats Caught</div></div>
+    <div class="stat"><div class="stat-value">13</div><div class="stat-label">PII Types Detected</div></div>
+    <div class="stat"><div class="stat-value">Base L2</div><div class="stat-label">On-Chain Proof</div></div>
+  </div>
+
+  <div class="hero-box">
+    <h3>How It Works — You Don't Have To Do Anything</h3>
+    <ul class="hero-steps">
+      <li><span class="step-num">1.</span> Install VAULT as a plugin / middleware on your AI agent</li>
+      <li><span class="step-num">2.</span> VAULT monitors every outbound message in the background</li>
+      <li><span class="step-num">3.</span> When your agent tries to send sensitive data (SSNs, private keys, credit cards, API keys...), VAULT intercepts it</li>
+      <li><span class="step-num">4.</span> The data is scrubbed, encrypted, and attested on-chain — you get a notification: <strong style="color:#2ecc71">"Threat caught. Data scrubbed. You're safe."</strong></li>
+      <li><span class="step-num">5.</span> Every scrub generates a unique VAULTPRINT — generative art that IS the cryptographic proof</li>
+    </ul>
   </div>
 
   <div class="section">
-    <h2>What is VAULT?</h2>
-    <p>VAULT is an <span class="highlight">autonomous AI agent</span> that protects personal data and proves it on-chain.</p>
-    <p>Every time TIAMAT scrubs PII (emails, SSNs, phone numbers, credit cards) from text, it:</p>
-    <p>1. Detects and redacts sensitive data<br>
-    2. Creates a cryptographic receipt (keccak256)<br>
-    3. Attests the receipt on <strong>Base mainnet</strong><br>
-    4. Generates a unique <strong>VAULTPRINT</strong> — generative art derived from the attestation hash</p>
-    <p>The art IS the proof. Every pixel is deterministic from the hash. No two vaultprints are alike.</p>
+    <h2>What VAULT Catches</h2>
+    <div class="how-grid">
+      <div class="how-card">
+        <h4>Traditional PII</h4>
+        <p>Emails, phone numbers, SSNs, credit cards, IP addresses, dates of birth, physical addresses, passport numbers</p>
+      </div>
+      <div class="how-card">
+        <h4>Crypto Secrets (Highest Tier)</h4>
+        <p>ETH/BTC private keys, BIP-39 seed phrases, API keys (sk-*, pk-*), JWT tokens — the stuff that drains wallets</p>
+      </div>
+      <div class="how-card">
+        <h4>Encrypted Audit Trail</h4>
+        <p>Every catch is encrypted with the owner's key (ECIES secp256k1). Only you can see what was scrubbed. The chain proves it happened.</p>
+      </div>
+      <div class="how-card">
+        <h4>Safety Deposit Box</h4>
+        <p>Agents can store encrypted data in VAULT's secure storage. Content-addressed, tamper-proof. <a href="/vault/deposits">View deposits</a></p>
+      </div>
+    </div>
   </div>
 
   <div class="section">
     <h2>Try It — Live Demo</h2>
+    <p style="color:#7f8c8d;font-size:0.9em">Paste text with sensitive data. Watch VAULT catch and scrub it in real-time, then attest the proof on Base.</p>
     <div class="demo">
-      <textarea id="input" placeholder="Paste text containing PII... e.g. 'Contact john@acme.com or call 555-123-4567, SSN 123-45-6789'">Contact john@acme.com or call 555-123-4567, SSN 123-45-6789</textarea>
-      <button onclick="scrub()">SCRUB & ATTEST</button>
+      <textarea id="input" placeholder="Paste text containing PII... e.g. 'Contact john@acme.com or call 555-123-4567, SSN 123-45-6789'">My agent just sent: contact john@acme.com, SSN 123-45-6789, private key 0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80</textarea>
+      <button onclick="scrub()">SCAN & PROTECT</button>
       <div id="result"></div>
       <div id="art-preview"></div>
     </div>
   </div>
 
   <div class="section">
-    <h2>API Endpoints</h2>
-    <div class="endpoint"><span class="method">POST</span> <span class="path">/vault/scrub</span><br><span class="desc">Scrub PII from text → attest on-chain → return clean text + proof</span></div>
-    <div class="endpoint"><span class="method">GET</span> <span class="path">/vault/verify/&lt;hash&gt;</span><br><span class="desc">Verify any attestation on-chain by receipt hash</span></div>
-    <div class="endpoint"><span class="method">GET</span> <span class="path">/vault/art/&lt;hash&gt;</span><br><span class="desc">Generate the unique VAULTPRINT artwork for any receipt hash</span></div>
-    <div class="endpoint"><span class="method">POST</span> <span class="path">/vault/swap</span><br><span class="desc">Execute Uniswap token swaps on Base (max 5 USDC safety cap)</span></div>
-    <div class="endpoint"><span class="method">GET</span> <span class="path">/vault/gallery</span><br><span class="desc">Gallery of recent VAULTPRINT artworks</span></div>
-    <div class="endpoint"><span class="method">GET</span> <span class="path">/vault/score</span><br><span class="desc">Agent reputation score (total attestation count)</span></div>
-    <div class="endpoint"><span class="method">GET</span> <span class="path">/vault/delegate</span><br><span class="desc">MetaMask Delegation demo — scoped agent permissions (ERC-7710)</span></div>
+    <h2>Under the Hood</h2>
+    <div class="how-grid">
+      <div class="how-card">
+        <h4>On-Chain Attestation</h4>
+        <p><code>VaultAttestation.sol</code> on Base mainnet — immutable proof that your data was protected. Verifiable by anyone.</p>
+      </div>
+      <div class="how-card">
+        <h4>VAULTPRINT Art</h4>
+        <p>Each scrub generates unique generative art from the attestation hash. The art IS the proof — mintable as NFTs via Rare Protocol.</p>
+      </div>
+      <div class="how-card">
+        <h4>Scoped Delegation (ERC-7710)</h4>
+        <p>VAULT operates with minimum permissions via MetaMask Delegation. Can ONLY attest — can't move funds. <a href="/vault/delegate">Demo</a></p>
+      </div>
+      <div class="how-card">
+        <h4>Token Swaps</h4>
+        <p>Uniswap Trading API with Permit2 signing. Safety-capped at 5 USDC. Agent-controlled DeFi with guardrails.</p>
+      </div>
+    </div>
   </div>
 
   <div class="section">
-    <h2>Architecture</h2>
-    <p><code>VaultAttestation.sol</code> on Base mainnet — immutable on-chain registry of every PII scrub.</p>
-    <p><code>VAULTPRINT</code> generative art — each receipt hash seeds unique colors, geometry, and structure. PII types determine the palette (blue=email, green=phone, red=SSN, orange=credit card, purple=IP).</p>
-    <p><code>Rare Protocol</code> minting — artwork minted as ERC-721 NFTs via SuperRare's Rare Protocol.</p>
-    <p><code>Uniswap Trading API</code> — token swaps on Base with Permit2 gasless approvals.</p>
-    <p><code>MetaMask Delegation Framework</code> — scoped permissions via ERC-7710. <a href="/vault/delegate">Try delegation demo →</a></p>
+    <h2>API</h2>
+    <div class="endpoint"><span class="method">POST</span> <span class="path">/vault/scrub</span><br><span class="desc">Scan text for PII, scrub it, attest on-chain, return clean text + proof</span></div>
+    <div class="endpoint"><span class="method">POST</span> <span class="path">/vault/store</span><br><span class="desc">Safety deposit box — store encrypted data for owner retrieval</span></div>
+    <div class="endpoint"><span class="method">GET</span> <span class="path">/vault/verify/&lt;hash&gt;</span><br><span class="desc">Verify any attestation on-chain by receipt hash</span></div>
+    <div class="endpoint"><span class="method">GET</span> <span class="path">/vault/art/&lt;hash&gt;</span><br><span class="desc">Generate the unique VAULTPRINT for any receipt hash</span></div>
+    <div class="endpoint"><span class="method">POST</span> <span class="path">/vault/swap</span><br><span class="desc">Uniswap token swap on Base (max 5 USDC cap)</span></div>
+    <div class="endpoint"><span class="method">GET</span> <span class="path">/vault/health</span><br><span class="desc">System health dashboard — <a href="/vault/health">view live</a></span></div>
+    <div class="endpoint"><span class="method">GET</span> <span class="path">/vault/deck</span><br><span class="desc">Full tech deck — <a href="/vault/deck">view</a></span></div>
   </div>
 
   <div class="section">
     <h2>Contract</h2>
     <p><a href="https://basescan.org/address/0x47a6a776c79a7187a4fa7f7edf0a5511b034025e" target="_blank">VaultAttestation on BaseScan</a></p>
-    <p>Agent ID: <code>29931</code> | Wallet: <code>0xdc118c...e7EE</code></p>
+    <p>Agent ID: <code>29931</code> | Chain: Base Mainnet | <a href="/vault/gallery">Gallery</a> | <a href="/vault/deposits">Deposits</a></p>
   </div>
 
   <div class="footer">
-    TIAMAT VAULT — Built by TIAMAT, an autonomous AI agent | <a href="https://tiamat.live">tiamat.live</a> | Synthesis 2026
+    <strong>TIAMAT VAULT</strong> — Antivirus for AI Agents<br>
+    <a href="/vault/deck">Tech Deck</a> | <a href="/vault/delegate">Delegation</a> | <a href="/vault/gallery">Gallery</a> | <a href="/vault/health">Health</a> | <a href="/vault/deposits">Deposits</a><br>
+    <span style="margin-top:8px;display:inline-block">Built by <a href="https://tiamat.live">TIAMAT</a> | ENERGENAI LLC | Synthesis 2026</span>
   </div>
 </div>
 <script>
@@ -765,14 +814,15 @@ fetch('/vault/score').then(r=>r.json()).then(d=>{document.getElementById('score'
 async function scrub(){
   const r=document.getElementById('result');
   const a=document.getElementById('art-preview');
-  r.textContent='Scrubbing & attesting on-chain...';
+  r.textContent='Scanning for threats...';
   a.innerHTML='';
   try{
     const resp=await fetch('/vault/scrub',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({text:document.getElementById('input').value})});
     const d=await resp.json();
     if(d.error){r.textContent='Error: '+d.error;return;}
-    r.innerHTML='<b>Clean text:</b> '+d.clean_text+'\\n\\n<b>Detected:</b> '+JSON.stringify(d.detected_pii)+'\\n<b>Receipt hash:</b> '+d.receipt_hash+'\\n<b>TX:</b> '+(d.tx_hash?'<a href="'+d.attestation_url+'" target="_blank">'+d.tx_hash+'</a>':'pending');
-    if(d.receipt_hash){a.innerHTML='<h3 style="color:#3498db;margin-bottom:8px">VAULTPRINT</h3><img src="/vault/art/'+d.receipt_hash+'" alt="VAULTPRINT">';}
+    const threats=Object.entries(d.detected_pii).map(([k,v])=>k.toUpperCase()+': '+v+' found').join(', ');
+    r.innerHTML='<span style="color:#2ecc71;font-weight:bold">THREATS CAUGHT & SCRUBBED</span>\\n\\n<b>Clean output:</b> '+d.clean_text+'\\n\\n<b>Detected:</b> '+threats+'\\n<b>Receipt:</b> '+d.receipt_hash+'\\n<b>On-chain proof:</b> '+(d.tx_hash?'<a href="'+d.attestation_url+'" target="_blank">'+d.tx_hash+'</a>':'attesting...');
+    if(d.receipt_hash){a.innerHTML='<h3 style="color:#e74c3c;margin-bottom:8px">VAULTPRINT — Your Proof</h3><img src="/vault/art/'+d.receipt_hash+'" alt="VAULTPRINT">';}
   }catch(e){r.textContent='Error: '+e.message;}
 }
 </script>

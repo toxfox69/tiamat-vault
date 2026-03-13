@@ -199,7 +199,7 @@ export async function redeemVaultDelegation(
           functionName: "redeemDelegations",
           args: [
             [[signedDelegation]], // permissionContexts
-            [ExecutionMode.CALL], // modes
+            [ExecutionMode.SingleDefault], // modes
             [[execution]], // executionCalldatas
           ],
         }),
@@ -396,8 +396,50 @@ if (process.argv[1]?.endsWith("delegation.mjs")) {
     console.log(`  TIAMAT EOA: ${tiamatBal.balance} ETH`);
     console.log(`  Delegator SA: ${delegatorBal.balance} ETH\n`);
 
-    // Step 3: Redeem delegation (attest on behalf of delegator)
-    console.log("Step 3: Redeeming delegation (direct call)...");
+    // Step 3: Deploy delegator smart account via bundler (if needed)
+    console.log("Step 3: Deploying delegator smart account via bundler...");
+    try {
+      const { smartAccount: delegatorSA } = await createSmartAccount(key);
+      const code = await publicClient.getCode({ address: delegatorSA.address });
+      if (!code || code === "0x") {
+        console.log("  Smart account not deployed yet, deploying via bundler...");
+        const bundlerClient = createBundlerClient({
+          chain: sepolia,
+          transport: http(PIMLICO_BUNDLER),
+          client: publicClient,
+        });
+
+        // Fetch current gas prices from Pimlico
+        const gasPrice = await bundlerClient.request({
+          method: "pimlico_getUserOperationGasPrice",
+        });
+        const fast = gasPrice.fast;
+        console.log(`  Gas price: maxFee=${fast.maxFeePerGas}, priority=${fast.maxPriorityFeePerGas}`);
+
+        // Send a no-op UserOperation to deploy the smart account
+        const deployHash = await bundlerClient.sendUserOperation({
+          account: delegatorSA,
+          calls: [{ to: delegatorSA.address, value: 0n, data: "0x" }],
+          maxFeePerGas: BigInt(fast.maxFeePerGas),
+          maxPriorityFeePerGas: BigInt(fast.maxPriorityFeePerGas),
+        });
+        console.log(`  Deploy UserOp: ${deployHash}`);
+        const deployReceipt = await bundlerClient.waitForUserOperationReceipt({
+          hash: deployHash,
+          timeout: 90_000,
+        });
+        console.log(`  Deploy TX: ${deployReceipt.receipt.transactionHash}`);
+        console.log(`  Deploy status: ${deployReceipt.receipt.status}\n`);
+      } else {
+        console.log(`  Smart account already deployed at ${delegatorSA.address}\n`);
+      }
+    } catch (e) {
+      console.error(`  Deploy error: ${e.message}`);
+      console.log("  Trying redemption anyway...\n");
+    }
+
+    // Step 4: Redeem delegation (attest on behalf of delegator)
+    console.log("Step 4: Redeeming delegation (direct call)...");
     try {
       const redeemResult = await redeemDirect(
         key,
@@ -417,10 +459,30 @@ if (process.argv[1]?.endsWith("delegation.mjs")) {
       console.log(`  Explorer: ${redeemResult.sepoliaUrl}`);
     } catch (e) {
       console.error(`  Redemption error: ${e.message}`);
-      console.log("  (Delegator smart account may need to be deployed first)");
-      console.log(
-        "  Fund the delegator address and retry, or use bundler approach"
-      );
+      console.log("  Trying bundler approach...\n");
+
+      // Fallback: try the bundler-based redemption
+      console.log("Step 4b: Redeeming via bundler (UserOperation)...");
+      try {
+        const bundlerResult = await redeemVaultDelegation(
+          key,
+          delegationResult.delegation,
+          {
+            agentId: 29931,
+            receiptHash:
+              "0x3ba9dfab9400fd38c6946b0ad1667d452c8e710f725e2fb400b1f142e8e00a74",
+            policyHash:
+              "0x0000000000000000000000000000000000000000000000000000000000000001",
+            ipfsCid: "",
+          }
+        );
+        console.log(`  TX: ${bundlerResult.txHash}`);
+        console.log(`  Block: ${bundlerResult.blockNumber}`);
+        console.log(`  Status: ${bundlerResult.status}`);
+        console.log(`  Explorer: ${bundlerResult.sepoliaUrl}`);
+      } catch (e2) {
+        console.error(`  Bundler redemption error: ${e2.message}`);
+      }
     }
   } else {
     console.log("TIAMAT VAULT — MetaMask Delegation Module");
