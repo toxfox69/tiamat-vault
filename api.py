@@ -412,7 +412,7 @@ a{{color:#f6851b}}
 </div>
 
 <div class="footer">
-  <a href="/vault/">VAULT</a> | <a href="/vault/delegate">Delegate</a> | <a href="/vault/gallery">Gallery</a> | <a href="/vault/health?json=1">JSON</a>
+  <a href="/vault/">VAULT</a> | <a href="/vault/delegate">Delegate</a> | <a href="/vault/gallery">Gallery</a> | <a href="/vault/deck">Tech Deck</a>
   <br>TIAMAT VAULT | <a href="https://tiamat.live">tiamat.live</a>
 </div>
 </div></body></html>'''
@@ -457,6 +457,200 @@ def art(receipt_hash_hex: str):
 def gallery():
     """Gallery page showing recent vaultprints."""
     return GALLERY_HTML
+
+
+@app.route("/vault/deck", methods=["GET"])
+def tech_deck():
+    """Serve the tech deck HTML."""
+    return send_file("/root/vault/TECH_DECK.html", mimetype="text/html")
+
+
+# ─── VAULT STORAGE — Safety Deposit Box for Agents ───────────────────
+
+import hashlib
+import os
+import json as _json
+
+VAULT_STORAGE_DIR = "/root/vault/vault_storage"
+os.makedirs(VAULT_STORAGE_DIR, exist_ok=True)
+
+# In-memory index of vault deposits (persisted to disk)
+VAULT_INDEX_FILE = os.path.join(VAULT_STORAGE_DIR, "_index.json")
+
+
+def _load_vault_index():
+    if os.path.exists(VAULT_INDEX_FILE):
+        with open(VAULT_INDEX_FILE) as f:
+            return _json.load(f)
+    return {}
+
+
+def _save_vault_index(index):
+    with open(VAULT_INDEX_FILE, "w") as f:
+        _json.dump(index, f)
+
+
+@app.route("/vault/store", methods=["POST"])
+@rate_limit
+def vault_store():
+    """Safety deposit box: agents store encrypted data on behalf of owners.
+
+    The data is encrypted client-side with the owner's public key.
+    VAULT stores the blob and returns a vault_id (content hash).
+    Only the owner can decrypt — VAULT never sees plaintext.
+
+    Body: {
+        "data": "<base64 or hex encoded encrypted blob>",
+        "owner": "<ETH address of the data owner>",
+        "agent_id": <agent ID making the deposit>,
+        "label": "<optional human-readable label>",
+        "encoding": "hex" | "base64"  (default: hex)
+    }
+    """
+    data = request.get_json(silent=True)
+    if not data or "data" not in data:
+        return jsonify({"error": "Missing 'data' field"}), 400
+
+    owner = data.get("owner", "unknown")
+    agent_id = data.get("agent_id", AGENT_ID)
+    label = data.get("label", "")
+    encoding = data.get("encoding", "hex")
+
+    # Decode the encrypted blob
+    try:
+        if encoding == "base64":
+            import base64
+            blob = base64.b64decode(data["data"])
+        else:
+            raw = data["data"].replace("0x", "")
+            blob = bytes.fromhex(raw)
+    except Exception:
+        return jsonify({"error": "Invalid data encoding"}), 400
+
+    if len(blob) > 100 * 1024:  # 100KB max per deposit
+        return jsonify({"error": "Data too large (max 100KB)"}), 400
+
+    # Content-addressed storage
+    vault_id = "0x" + hashlib.sha256(blob).hexdigest()
+    filename = vault_id.replace("0x", "") + ".vault"
+    filepath = os.path.join(VAULT_STORAGE_DIR, filename)
+
+    with open(filepath, "wb") as f:
+        f.write(blob)
+
+    # Update index
+    index = _load_vault_index()
+    index[vault_id] = {
+        "owner": owner,
+        "agent_id": agent_id,
+        "label": label,
+        "size": len(blob),
+        "timestamp": int(time.time()),
+    }
+    _save_vault_index(index)
+
+    return jsonify({
+        "vault_id": vault_id,
+        "owner": owner,
+        "agent_id": agent_id,
+        "label": label,
+        "size": len(blob),
+        "retrieve_url": f"https://tiamat.live/vault/retrieve/{vault_id}",
+    })
+
+
+@app.route("/vault/retrieve/<vault_id>", methods=["GET"])
+def vault_retrieve(vault_id: str):
+    """Retrieve an encrypted blob from the vault by its ID.
+
+    Returns the raw encrypted bytes. Only the owner can decrypt
+    with their private key.
+    """
+    if not vault_id.startswith("0x"):
+        vault_id = "0x" + vault_id
+    filename = vault_id.replace("0x", "") + ".vault"
+    filepath = os.path.join(VAULT_STORAGE_DIR, filename)
+
+    if not os.path.exists(filepath):
+        return jsonify({"error": "Vault deposit not found"}), 404
+
+    index = _load_vault_index()
+    meta = index.get(vault_id, {})
+
+    with open(filepath, "rb") as f:
+        blob = f.read()
+
+    return Response(blob, mimetype="application/octet-stream", headers={
+        "X-Vault-ID": vault_id,
+        "X-Owner": meta.get("owner", "unknown"),
+        "X-Agent-ID": str(meta.get("agent_id", "")),
+        "X-Label": meta.get("label", ""),
+        "X-Encryption": "ECIES-secp256k1 (client-side)",
+    })
+
+
+@app.route("/vault/deposits", methods=["GET"])
+def vault_deposits():
+    """List vault deposits. Filter by owner address."""
+    owner = request.args.get("owner", "")
+    index = _load_vault_index()
+
+    deposits = []
+    for vault_id, meta in index.items():
+        if owner and meta.get("owner", "").lower() != owner.lower():
+            continue
+        deposits.append({"vault_id": vault_id, **meta})
+
+    # Sort by timestamp descending
+    deposits.sort(key=lambda d: d.get("timestamp", 0), reverse=True)
+
+    # Return styled HTML for browsers
+    if "application/json" not in request.headers.get("Accept", "") and not request.args.get("json"):
+        rows = ""
+        for d in deposits[:50]:
+            ts = time.strftime("%Y-%m-%d %H:%M", time.gmtime(d.get("timestamp", 0)))
+            rows += f'''<tr>
+              <td style="padding:8px;font-family:monospace;font-size:0.8em"><a href="/vault/retrieve/{d["vault_id"]}" style="color:#f6851b">{d["vault_id"][:18]}...</a></td>
+              <td style="padding:8px;font-size:0.85em">{d.get("owner","?")[:12]}...</td>
+              <td style="padding:8px">{d.get("agent_id","")}</td>
+              <td style="padding:8px">{d.get("label","")}</td>
+              <td style="padding:8px">{d.get("size",0)} B</td>
+              <td style="padding:8px;color:#7f8c8d">{ts}</td>
+            </tr>'''
+
+        return f'''<!DOCTYPE html>
+<html lang="en"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1.0">
+<title>VAULT Deposits</title>
+<style>
+*{{margin:0;padding:0;box-sizing:border-box}}
+body{{background:#0a0a0e;color:#e0e0e0;font-family:'JetBrains Mono','Fira Code',monospace;min-height:100vh}}
+.container{{max-width:900px;margin:0 auto;padding:40px 20px}}
+h1{{font-size:2em;color:#fff;margin-bottom:8px}}
+h1 span{{color:#f6851b}}
+.subtitle{{color:#7f8c8d;margin-bottom:30px}}
+table{{width:100%;border-collapse:collapse;margin:20px 0}}
+th{{background:#1a1a2e;color:#f6851b;padding:10px;text-align:left;font-size:0.9em}}
+tr{{border-bottom:1px solid #1a1a2e}}
+tr:hover{{background:#12121a}}
+.empty{{color:#555;text-align:center;padding:40px}}
+.footer{{margin-top:40px;padding-top:16px;border-top:1px solid #1a1a2e;color:#555;font-size:0.8em;text-align:center}}
+a{{color:#f6851b}}
+</style></head><body>
+<div class="container">
+<h1>VAULT <span>DEPOSITS</span></h1>
+<div class="subtitle">Encrypted safety deposit box — only owners can decrypt</div>
+<p style="color:#7f8c8d;margin-bottom:20px">{len(deposits)} deposit{"s" if len(deposits)!=1 else ""}{f" for {owner[:12]}..." if owner else ""}</p>
+<table>
+<tr><th>Vault ID</th><th>Owner</th><th>Agent</th><th>Label</th><th>Size</th><th>Date</th></tr>
+{rows if rows else '<tr><td colspan="6" class="empty">No deposits yet</td></tr>'}
+</table>
+<div class="footer">
+  <a href="/vault/">VAULT</a> | <a href="/vault/delegate">Delegate</a> | <a href="/vault/gallery">Gallery</a> | <a href="/vault/health">Health</a>
+  <br>TIAMAT VAULT | <a href="https://tiamat.live">tiamat.live</a>
+</div>
+</div></body></html>'''
+
+    return jsonify({"deposits": deposits, "total": len(deposits)})
 
 
 @app.route("/vault/", methods=["GET"])
