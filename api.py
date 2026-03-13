@@ -1,0 +1,532 @@
+"""TIAMAT VAULT — Flask API for PII scrubbing with on-chain attestation + Uniswap swaps.
+
+Endpoints:
+  POST /vault/scrub          — Scrub PII from text, attest on-chain
+  GET  /vault/verify/<hash>  — Verify attestation on-chain
+  GET  /vault/score          — Agent attestation count
+  GET  /vault/health         — Health check
+  POST /vault/swap           — Uniswap token swap (Base)
+  GET  /vault/art/<hash>     — Generate vaultprint art for a receipt hash
+  GET  /vault/gallery        — Gallery of all vaultprints
+  GET  /vault/               — Landing page
+"""
+
+import io
+import re
+import time
+from collections import defaultdict
+from functools import wraps
+
+from dotenv import load_dotenv
+from flask import Flask, Response, jsonify, request, send_file
+
+load_dotenv("/root/.env")
+
+from attest import (
+    AGENT_ID,
+    CONTRACT_ADDRESS,
+    attest_on_chain,
+    get_agent_score,
+    get_total_attestations,
+    policy_hash,
+    receipt_hash,
+    verify_attestation,
+)
+from uniswap import full_swap
+from vaultart import generate_vaultprint, vaultprint_to_bytes
+
+app = Flask(__name__)
+app.config["MAX_CONTENT_LENGTH"] = 50 * 1024  # 50KB
+
+# Store scrub history for gallery (in-memory, persists per worker)
+_scrub_history = []
+MAX_HISTORY = 100
+
+# --- PII Detection Patterns ---
+PII_PATTERNS = {
+    "email": re.compile(r"[a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[a-zA-Z]{2,}"),
+    "phone": re.compile(r"(?<!\d)(?:\+?1[-.\s]?)?(?:\(?\d{3}\)?[-.\s]?)?\d{3}[-.\s]?\d{4}(?!\d)"),
+    "ssn": re.compile(r"\b\d{3}-\d{2}-\d{4}\b"),
+    "credit_card": re.compile(r"\b(?:\d{4}[-\s]?){3}\d{4}\b"),
+    "ip_address": re.compile(r"\b(?:\d{1,3}\.){3}\d{1,3}\b"),
+    "date_of_birth": re.compile(
+        r"\b(?:0[1-9]|1[0-2])[/\-](?:0[1-9]|[12]\d|3[01])[/\-](?:19|20)\d{2}\b"
+    ),
+    "us_address": re.compile(
+        r"\b\d{1,5}\s+[\w\s]+(?:St|Street|Ave|Avenue|Blvd|Boulevard|Dr|Drive|Ln|Lane|Rd|Road|Ct|Court|Way|Pl|Place)\.?\s*,?\s*[\w\s]+,?\s*[A-Z]{2}\s*\d{5}(?:-\d{4})?\b",
+        re.IGNORECASE,
+    ),
+    "passport": re.compile(r"\b[A-Z]{1,2}\d{6,9}\b"),
+}
+
+REDACT_LABELS = {
+    "email": "[EMAIL_REDACTED]",
+    "phone": "[PHONE_REDACTED]",
+    "ssn": "[SSN_REDACTED]",
+    "credit_card": "[CC_REDACTED]",
+    "ip_address": "[IP_REDACTED]",
+    "date_of_birth": "[DOB_REDACTED]",
+    "us_address": "[ADDRESS_REDACTED]",
+    "passport": "[PASSPORT_REDACTED]",
+}
+
+# --- Rate Limiting ---
+_rate_store = defaultdict(list)
+RATE_LIMIT = 10  # per minute
+RATE_WINDOW = 60  # seconds
+
+
+def rate_limit(f):
+    @wraps(f)
+    def decorated(*args, **kwargs):
+        ip = request.headers.get("X-Real-IP", request.remote_addr)
+        now = time.time()
+        _rate_store[ip] = [t for t in _rate_store[ip] if now - t < RATE_WINDOW]
+        if len(_rate_store[ip]) >= RATE_LIMIT:
+            return jsonify({"error": "Rate limit exceeded. Max 10 scrubs/min."}), 429
+        _rate_store[ip].append(now)
+        return f(*args, **kwargs)
+
+    return decorated
+
+
+# --- PII Detection & Redaction ---
+
+
+def detect_pii(text: str) -> dict:
+    """Detect PII types present in text. Returns {type: [matches]}."""
+    found = {}
+    for pii_type, pattern in PII_PATTERNS.items():
+        matches = pattern.findall(text)
+        if matches:
+            found[pii_type] = matches
+    return found
+
+
+def redact_pii(text: str, pii_types: list) -> tuple:
+    """Redact specified PII types from text. Returns (clean_text, redaction_count)."""
+    clean = text
+    count = 0
+    for pii_type in pii_types:
+        if pii_type in PII_PATTERNS:
+            pattern = PII_PATTERNS[pii_type]
+            label = REDACT_LABELS[pii_type]
+            matches = pattern.findall(clean)
+            count += len(matches)
+            clean = pattern.sub(label, clean)
+    return clean, count
+
+
+# --- Endpoints ---
+
+
+@app.route("/vault/scrub", methods=["POST"])
+@rate_limit
+def scrub():
+    """Scrub PII from text and attest on-chain."""
+    data = request.get_json(silent=True)
+    if not data or "text" not in data:
+        return jsonify({"error": "Missing 'text' field"}), 400
+
+    text = data["text"]
+    if not isinstance(text, str) or len(text) == 0:
+        return jsonify({"error": "Text must be a non-empty string"}), 400
+
+    # Default policy: redact all detected types
+    policy = data.get("policy", {})
+    redact_types = policy.get("redact", list(PII_PATTERNS.keys()))
+
+    # Validate redact types
+    invalid = [t for t in redact_types if t not in PII_PATTERNS]
+    if invalid:
+        return (
+            jsonify({"error": f"Invalid PII types: {invalid}", "valid_types": list(PII_PATTERNS.keys())}),
+            400,
+        )
+
+    # Detect
+    detected = detect_pii(text)
+
+    # Redact
+    clean_text, redaction_count = redact_pii(text, redact_types)
+
+    # Build receipt
+    receipt = {
+        "agent_id": AGENT_ID,
+        "action": "pii_scrub",
+        "pii_types_found": list(detected.keys()),
+        "pii_types_redacted": [t for t in redact_types if t in detected],
+        "redaction_count": redaction_count,
+        "text_length": len(text),
+        "clean_text_length": len(clean_text),
+        "timestamp": int(time.time()),
+        "policy": policy,
+    }
+
+    r_h = receipt_hash(receipt)
+    p_h = policy_hash(policy if policy else {"redact": redact_types, "version": "1.0"})
+
+    # Attest on-chain
+    tx_hash = None
+    attestation_url = None
+    try:
+        tx_hash = attest_on_chain(AGENT_ID, r_h, p_h)
+        attestation_url = f"https://basescan.org/tx/0x{tx_hash}"
+    except Exception as e:
+        receipt["attestation_error"] = str(e)
+
+    r_hash_hex = "0x" + r_h.hex()
+
+    # Store in history for gallery
+    _scrub_history.append({
+        "receipt_hash": r_hash_hex,
+        "pii_types_found": list(detected.keys()),
+        "pii_types_redacted": [t for t in redact_types if t in detected],
+        "redaction_count": redaction_count,
+        "tx_hash": f"0x{tx_hash}" if tx_hash else None,
+        "timestamp": receipt["timestamp"],
+    })
+    if len(_scrub_history) > MAX_HISTORY:
+        _scrub_history.pop(0)
+
+    return jsonify(
+        {
+            "clean_text": clean_text,
+            "receipt": receipt,
+            "receipt_hash": r_hash_hex,
+            "tx_hash": f"0x{tx_hash}" if tx_hash else None,
+            "attestation_url": attestation_url,
+            "detected_pii": {k: len(v) for k, v in detected.items()},
+            "art_url": f"https://tiamat.live/vault/art/{r_hash_hex}",
+        }
+    )
+
+
+@app.route("/vault/verify/<receipt_hash_hex>", methods=["GET"])
+def verify(receipt_hash_hex: str):
+    """Verify an attestation on-chain by receipt hash."""
+    try:
+        if not receipt_hash_hex.startswith("0x"):
+            receipt_hash_hex = "0x" + receipt_hash_hex
+        r_h = bytes.fromhex(receipt_hash_hex.replace("0x", ""))
+        if len(r_h) != 32:
+            return jsonify({"error": "Hash must be 32 bytes (64 hex chars)"}), 400
+    except ValueError:
+        return jsonify({"error": "Invalid hex hash"}), 400
+
+    try:
+        att = verify_attestation(r_h)
+        if att["timestamp"] == 0:
+            return jsonify({"attested": False, "receipt_hash": receipt_hash_hex}), 404
+        att["attested"] = True
+        att["basescan_url"] = f"https://basescan.org/address/{CONTRACT_ADDRESS}"
+        return jsonify(att)
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route("/vault/score", methods=["GET"])
+def score():
+    """Get agent attestation score."""
+    agent_id = request.args.get("agent_id", AGENT_ID, type=int)
+    try:
+        agent_score = get_agent_score(agent_id)
+        total = get_total_attestations()
+        return jsonify(
+            {
+                "agent_id": agent_id,
+                "score": agent_score,
+                "total_attestations": total,
+                "contract": CONTRACT_ADDRESS,
+            }
+        )
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route("/vault/swap", methods=["POST"])
+@rate_limit
+def swap():
+    """Execute a Uniswap swap on Base."""
+    data = request.get_json(silent=True)
+    if not data:
+        return jsonify({"error": "Missing JSON body"}), 400
+
+    token_in = data.get("token_in")
+    token_out = data.get("token_out")
+    amount = data.get("amount")
+    confirm = data.get("confirm", False)
+
+    if not all([token_in, token_out, amount]):
+        return (
+            jsonify({"error": "Required: token_in, token_out, amount", "example": {"token_in": "USDC", "token_out": "WETH", "amount": "100000"}}),
+            400,
+        )
+
+    try:
+        result = full_swap(token_in, token_out, str(amount), confirm=bool(confirm))
+        # Strip raw quote from response (too large)
+        result.pop("quote", None)
+        return jsonify(result)
+    except ValueError as e:
+        return jsonify({"error": str(e)}), 400
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route("/vault/health", methods=["GET"])
+def health():
+    """Health check."""
+    try:
+        score = get_agent_score()
+        chain_ok = True
+    except Exception:
+        score = None
+        chain_ok = False
+
+    return jsonify(
+        {
+            "status": "ok",
+            "service": "tiamat-vault",
+            "agent_id": AGENT_ID,
+            "contract": CONTRACT_ADDRESS,
+            "chain_connected": chain_ok,
+            "agent_score": score,
+            "pii_types": list(PII_PATTERNS.keys()),
+            "swap_tokens": ["USDC", "WETH", "ETH"],
+            "max_swap_usdc": "5.00",
+        }
+    )
+
+
+@app.route("/vault/art/<receipt_hash_hex>", methods=["GET"])
+def art(receipt_hash_hex: str):
+    """Generate vaultprint artwork for a receipt hash."""
+    try:
+        h = receipt_hash_hex.replace("0x", "")
+        if len(h) != 64:
+            return jsonify({"error": "Hash must be 32 bytes (64 hex chars)"}), 400
+        bytes.fromhex(h)
+    except ValueError:
+        return jsonify({"error": "Invalid hex hash"}), 400
+
+    # Check history for PII type info, or use defaults
+    pii_found = []
+    pii_redacted = []
+    redaction_count = 0
+    for entry in _scrub_history:
+        if entry["receipt_hash"].replace("0x", "") == h:
+            pii_found = entry["pii_types_found"]
+            pii_redacted = entry["pii_types_redacted"]
+            redaction_count = entry["redaction_count"]
+            break
+
+    img = generate_vaultprint(
+        "0x" + h,
+        pii_types_found=pii_found,
+        pii_types_redacted=pii_redacted,
+        redaction_count=redaction_count,
+    )
+    img_bytes = vaultprint_to_bytes(img)
+
+    return Response(img_bytes, mimetype="image/png", headers={
+        "Cache-Control": "public, max-age=86400",
+    })
+
+
+@app.route("/vault/gallery", methods=["GET"])
+def gallery():
+    """Gallery page showing recent vaultprints."""
+    return GALLERY_HTML
+
+
+@app.route("/vault/", methods=["GET"])
+def landing():
+    """VAULT landing page."""
+    return LANDING_HTML
+
+
+LANDING_HTML = """<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>TIAMAT VAULT — Privacy Protection as Art</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { background: #0a0a0e; color: #e0e0e0; font-family: 'JetBrains Mono', 'Fira Code', monospace; min-height: 100vh; }
+  .container { max-width: 900px; margin: 0 auto; padding: 40px 20px; }
+  h1 { font-size: 2.5em; color: #fff; margin-bottom: 8px; }
+  h1 span { color: #3498db; }
+  .subtitle { color: #7f8c8d; font-size: 1.1em; margin-bottom: 40px; }
+  .section { margin-bottom: 40px; }
+  h2 { color: #3498db; font-size: 1.3em; margin-bottom: 16px; border-bottom: 1px solid #1a1a2e; padding-bottom: 8px; }
+  p { line-height: 1.7; margin-bottom: 12px; color: #bdc3c7; }
+  .highlight { color: #e74c3c; font-weight: bold; }
+  .endpoint { background: #12121a; border: 1px solid #1a1a2e; border-radius: 8px; padding: 16px; margin-bottom: 12px; }
+  .method { color: #2ecc71; font-weight: bold; }
+  .path { color: #f39c12; }
+  .desc { color: #95a5a6; font-size: 0.9em; }
+  code { background: #1a1a2e; padding: 2px 6px; border-radius: 3px; color: #3498db; }
+  .cta { display: inline-block; background: #3498db; color: #fff; padding: 12px 24px; border-radius: 6px; text-decoration: none; margin-top: 16px; }
+  .cta:hover { background: #2980b9; }
+  .stats { display: flex; gap: 20px; flex-wrap: wrap; margin: 20px 0; }
+  .stat { background: #12121a; border: 1px solid #1a1a2e; border-radius: 8px; padding: 16px 24px; flex: 1; min-width: 150px; text-align: center; }
+  .stat-value { font-size: 1.8em; color: #3498db; }
+  .stat-label { color: #7f8c8d; font-size: 0.85em; }
+  .demo { background: #12121a; border: 1px solid #2c3e50; border-radius: 8px; padding: 20px; }
+  textarea { width: 100%; background: #1a1a2e; color: #ecf0f1; border: 1px solid #2c3e50; border-radius: 4px; padding: 12px; font-family: inherit; font-size: 0.9em; resize: vertical; min-height: 80px; }
+  button { background: #e74c3c; color: #fff; border: none; padding: 10px 20px; border-radius: 4px; cursor: pointer; font-family: inherit; font-size: 1em; margin-top: 10px; }
+  button:hover { background: #c0392b; }
+  #result { margin-top: 16px; white-space: pre-wrap; font-size: 0.85em; max-height: 400px; overflow-y: auto; }
+  #art-preview { margin-top: 16px; text-align: center; }
+  #art-preview img { max-width: 400px; border: 1px solid #2c3e50; border-radius: 8px; }
+  .footer { margin-top: 60px; padding-top: 20px; border-top: 1px solid #1a1a2e; color: #555; font-size: 0.85em; text-align: center; }
+  a { color: #3498db; }
+</style>
+</head>
+<body>
+<div class="container">
+  <h1>TIAMAT <span>VAULT</span></h1>
+  <div class="subtitle">Privacy Protection as Generative Art — Powered by Autonomous AI</div>
+
+  <div class="stats" id="stats">
+    <div class="stat"><div class="stat-value" id="score">—</div><div class="stat-label">On-Chain Attestations</div></div>
+    <div class="stat"><div class="stat-value">8</div><div class="stat-label">PII Types Detected</div></div>
+    <div class="stat"><div class="stat-value">Base</div><div class="stat-label">L2 Chain</div></div>
+  </div>
+
+  <div class="section">
+    <h2>What is VAULT?</h2>
+    <p>VAULT is an <span class="highlight">autonomous AI agent</span> that protects personal data and proves it on-chain.</p>
+    <p>Every time TIAMAT scrubs PII (emails, SSNs, phone numbers, credit cards) from text, it:</p>
+    <p>1. Detects and redacts sensitive data<br>
+    2. Creates a cryptographic receipt (keccak256)<br>
+    3. Attests the receipt on <strong>Base mainnet</strong><br>
+    4. Generates a unique <strong>VAULTPRINT</strong> — generative art derived from the attestation hash</p>
+    <p>The art IS the proof. Every pixel is deterministic from the hash. No two vaultprints are alike.</p>
+  </div>
+
+  <div class="section">
+    <h2>Try It — Live Demo</h2>
+    <div class="demo">
+      <textarea id="input" placeholder="Paste text containing PII... e.g. 'Contact john@acme.com or call 555-123-4567, SSN 123-45-6789'">Contact john@acme.com or call 555-123-4567, SSN 123-45-6789</textarea>
+      <button onclick="scrub()">SCRUB & ATTEST</button>
+      <div id="result"></div>
+      <div id="art-preview"></div>
+    </div>
+  </div>
+
+  <div class="section">
+    <h2>API Endpoints</h2>
+    <div class="endpoint"><span class="method">POST</span> <span class="path">/vault/scrub</span><br><span class="desc">Scrub PII from text → attest on-chain → return clean text + proof</span></div>
+    <div class="endpoint"><span class="method">GET</span> <span class="path">/vault/verify/&lt;hash&gt;</span><br><span class="desc">Verify any attestation on-chain by receipt hash</span></div>
+    <div class="endpoint"><span class="method">GET</span> <span class="path">/vault/art/&lt;hash&gt;</span><br><span class="desc">Generate the unique VAULTPRINT artwork for any receipt hash</span></div>
+    <div class="endpoint"><span class="method">POST</span> <span class="path">/vault/swap</span><br><span class="desc">Execute Uniswap token swaps on Base (max 5 USDC safety cap)</span></div>
+    <div class="endpoint"><span class="method">GET</span> <span class="path">/vault/gallery</span><br><span class="desc">Gallery of recent VAULTPRINT artworks</span></div>
+    <div class="endpoint"><span class="method">GET</span> <span class="path">/vault/score</span><br><span class="desc">Agent reputation score (total attestation count)</span></div>
+    <div class="endpoint"><span class="method">GET</span> <span class="path">/vault/delegate</span><br><span class="desc">MetaMask Delegation demo — scoped agent permissions (ERC-7710)</span></div>
+  </div>
+
+  <div class="section">
+    <h2>Architecture</h2>
+    <p><code>VaultAttestation.sol</code> on Base mainnet — immutable on-chain registry of every PII scrub.</p>
+    <p><code>VAULTPRINT</code> generative art — each receipt hash seeds unique colors, geometry, and structure. PII types determine the palette (blue=email, green=phone, red=SSN, orange=credit card, purple=IP).</p>
+    <p><code>Rare Protocol</code> minting — artwork minted as ERC-721 NFTs via SuperRare's Rare Protocol.</p>
+    <p><code>Uniswap Trading API</code> — token swaps on Base with Permit2 gasless approvals.</p>
+    <p><code>MetaMask Delegation Framework</code> — scoped permissions via ERC-7710. <a href="/vault/delegate">Try delegation demo →</a></p>
+  </div>
+
+  <div class="section">
+    <h2>Contract</h2>
+    <p><a href="https://basescan.org/address/0x47a6a776c79a7187a4fa7f7edf0a5511b034025e" target="_blank">VaultAttestation on BaseScan</a></p>
+    <p>Agent ID: <code>29931</code> | Wallet: <code>0xdc118c...e7EE</code></p>
+  </div>
+
+  <div class="footer">
+    TIAMAT VAULT — Built by TIAMAT, an autonomous AI agent | <a href="https://tiamat.live">tiamat.live</a> | Synthesis 2026
+  </div>
+</div>
+<script>
+fetch('/vault/score').then(r=>r.json()).then(d=>{document.getElementById('score').textContent=d.score||'0'});
+async function scrub(){
+  const r=document.getElementById('result');
+  const a=document.getElementById('art-preview');
+  r.textContent='Scrubbing & attesting on-chain...';
+  a.innerHTML='';
+  try{
+    const resp=await fetch('/vault/scrub',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({text:document.getElementById('input').value})});
+    const d=await resp.json();
+    if(d.error){r.textContent='Error: '+d.error;return;}
+    r.innerHTML='<b>Clean text:</b> '+d.clean_text+'\\n\\n<b>Detected:</b> '+JSON.stringify(d.detected_pii)+'\\n<b>Receipt hash:</b> '+d.receipt_hash+'\\n<b>TX:</b> '+(d.tx_hash?'<a href="'+d.attestation_url+'" target="_blank">'+d.tx_hash+'</a>':'pending');
+    if(d.receipt_hash){a.innerHTML='<h3 style="color:#3498db;margin-bottom:8px">VAULTPRINT</h3><img src="/vault/art/'+d.receipt_hash+'" alt="VAULTPRINT">';}
+  }catch(e){r.textContent='Error: '+e.message;}
+}
+</script>
+</body></html>"""
+
+
+GALLERY_HTML = """<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>VAULTPRINTS Gallery — TIAMAT VAULT</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { background: #0a0a0e; color: #e0e0e0; font-family: 'JetBrains Mono', monospace; }
+  .container { max-width: 1200px; margin: 0 auto; padding: 40px 20px; }
+  h1 { font-size: 2em; color: #fff; margin-bottom: 8px; }
+  h1 span { color: #3498db; }
+  .subtitle { color: #7f8c8d; margin-bottom: 30px; }
+  .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 20px; }
+  .card { background: #12121a; border: 1px solid #1a1a2e; border-radius: 8px; overflow: hidden; transition: border-color 0.2s; }
+  .card:hover { border-color: #3498db; }
+  .card img { width: 100%; aspect-ratio: 1; object-fit: cover; }
+  .card-info { padding: 12px; }
+  .card-hash { font-size: 0.75em; color: #3498db; word-break: break-all; }
+  .card-pii { font-size: 0.8em; color: #e74c3c; margin-top: 4px; }
+  .card-tx { font-size: 0.7em; margin-top: 4px; }
+  .card-tx a { color: #7f8c8d; }
+  .empty { text-align: center; color: #555; padding: 60px; }
+  .back { color: #3498db; text-decoration: none; display: inline-block; margin-bottom: 20px; }
+</style>
+</head>
+<body>
+<div class="container">
+  <a class="back" href="/vault/">&larr; Back to VAULT</a>
+  <h1>VAULT<span>PRINTS</span> Gallery</h1>
+  <div class="subtitle">Each artwork is generated from a real on-chain privacy attestation</div>
+  <div class="grid" id="grid"></div>
+  <div class="empty" id="empty" style="display:none">No vaultprints yet. <a href="/vault/" style="color:#3498db">Scrub some PII</a> to create the first one.</div>
+</div>
+<script>
+fetch('/vault/gallery/data').then(r=>r.json()).then(items=>{
+  const g=document.getElementById('grid');
+  const e=document.getElementById('empty');
+  if(!items.length){e.style.display='block';return;}
+  items.reverse().forEach(item=>{
+    const c=document.createElement('div');c.className='card';
+    c.innerHTML='<img src="/vault/art/'+item.receipt_hash+'" loading="lazy"><div class="card-info"><div class="card-hash">'+item.receipt_hash+'</div><div class="card-pii">'+(item.pii_types_redacted.map(t=>t.toUpperCase()).join(' | ')||'CLEAN')+'</div>'+(item.tx_hash?'<div class="card-tx"><a href="https://basescan.org/tx/'+item.tx_hash+'" target="_blank">View on BaseScan &rarr;</a></div>':'')+'</div>';
+    g.appendChild(c);
+  });
+});
+</script>
+</body></html>"""
+
+
+@app.route("/vault/delegate", methods=["GET"])
+def delegate():
+    """MetaMask Delegation demo page."""
+    with open("/root/vault/templates/delegate.html") as f:
+        return f.read()
+
+
+@app.route("/vault/gallery/data", methods=["GET"])
+def gallery_data():
+    """Return gallery data as JSON."""
+    return jsonify(_scrub_history)
+
+
+if __name__ == "__main__":
+    app.run(host="127.0.0.1", port=5007, debug=True)
