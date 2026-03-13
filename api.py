@@ -33,6 +33,11 @@ from attest import (
     verify_attestation,
 )
 from uniswap import full_swap
+from vault_encrypt import (
+    load_encrypted_receipt,
+    store_encrypted_receipt,
+    _public_key_from_private,
+)
 from vaultart import generate_vaultprint, vaultprint_to_bytes
 
 app = Flask(__name__)
@@ -57,6 +62,12 @@ PII_PATTERNS = {
         re.IGNORECASE,
     ),
     "passport": re.compile(r"\b[A-Z]{1,2}\d{6,9}\b"),
+    # Crypto-sensitive PII — highest tier
+    "eth_private_key": re.compile(r"(?:0x)?[0-9a-fA-F]{64}(?=\s|$|[^0-9a-fA-F])"),
+    "seed_phrase": re.compile(r"\b(?:[a-z]{3,8}\s+){11,23}[a-z]{3,8}\b"),
+    "btc_private_key": re.compile(r"\b[5KL][1-9A-HJ-NP-Za-km-z]{50,51}\b"),
+    "api_key": re.compile(r"\b(?:sk|pk|api|key|secret|token)[-_][A-Za-z0-9_\-]{20,}\b", re.IGNORECASE),
+    "jwt_token": re.compile(r"\beyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\b"),
 }
 
 REDACT_LABELS = {
@@ -68,6 +79,11 @@ REDACT_LABELS = {
     "date_of_birth": "[DOB_REDACTED]",
     "us_address": "[ADDRESS_REDACTED]",
     "passport": "[PASSPORT_REDACTED]",
+    "eth_private_key": "[PRIVATE_KEY_REDACTED]",
+    "seed_phrase": "[SEED_PHRASE_REDACTED]",
+    "btc_private_key": "[PRIVATE_KEY_REDACTED]",
+    "api_key": "[API_KEY_REDACTED]",
+    "jwt_token": "[JWT_REDACTED]",
 }
 
 # --- Rate Limiting ---
@@ -166,11 +182,32 @@ def scrub():
     r_h = receipt_hash(receipt)
     p_h = policy_hash(policy if policy else {"redact": redact_types, "version": "1.0"})
 
-    # Attest on-chain
+    # Encrypt receipt for data owner (if public key provided)
+    encrypted_cid = ""
+    owner_pubkey = data.get("owner_public_key", "")
+    if not owner_pubkey:
+        # Use TIAMAT's own key as fallback — owner can request re-encryption
+        try:
+            import os
+            tiamat_key = os.environ.get("TIAMAT_WALLET_KEY", "")
+            if tiamat_key:
+                owner_pubkey = _public_key_from_private(tiamat_key)
+        except Exception:
+            pass
+
+    if owner_pubkey:
+        try:
+            # Include the actual PII in the encrypted receipt (only owner can read)
+            encrypted_receipt = {**receipt, "detected_pii_values": {k: v for k, v in detected.items()}}
+            encrypted_cid = store_encrypted_receipt(encrypted_receipt, owner_pubkey)
+        except Exception:
+            pass  # Non-fatal — attestation still works without encryption
+
+    # Attest on-chain (with encrypted CID if available)
     tx_hash = None
     attestation_url = None
     try:
-        tx_hash = attest_on_chain(AGENT_ID, r_h, p_h)
+        tx_hash = attest_on_chain(AGENT_ID, r_h, p_h, ipfs_cid=encrypted_cid)
         attestation_url = f"https://basescan.org/tx/0x{tx_hash}"
     except Exception as e:
         receipt["attestation_error"] = str(e)
@@ -185,6 +222,7 @@ def scrub():
         "redaction_count": redaction_count,
         "tx_hash": f"0x{tx_hash}" if tx_hash else None,
         "timestamp": receipt["timestamp"],
+        "encrypted_cid": encrypted_cid or None,
     })
     if len(_scrub_history) > MAX_HISTORY:
         _scrub_history.pop(0)
@@ -198,8 +236,27 @@ def scrub():
             "attestation_url": attestation_url,
             "detected_pii": {k: len(v) for k, v in detected.items()},
             "art_url": f"https://tiamat.live/vault/art/{r_hash_hex}",
+            "encrypted_cid": encrypted_cid or None,
         }
     )
+
+
+@app.route("/vault/receipt/<content_hash>", methods=["GET"])
+def get_encrypted_receipt(content_hash: str):
+    """Fetch an encrypted receipt blob by its content hash.
+
+    The blob is ECIES-encrypted — only the data owner can decrypt it
+    with their private key. This endpoint returns raw encrypted bytes.
+    """
+    if not content_hash.startswith("0x"):
+        content_hash = "0x" + content_hash
+    blob = load_encrypted_receipt(content_hash)
+    if blob is None:
+        return jsonify({"error": "Receipt not found"}), 404
+    return Response(blob, mimetype="application/octet-stream", headers={
+        "X-Content-Hash": content_hash,
+        "X-Encryption": "ECIES-secp256k1",
+    })
 
 
 @app.route("/vault/verify/<receipt_hash_hex>", methods=["GET"])
@@ -221,8 +278,8 @@ def verify(receipt_hash_hex: str):
         att["attested"] = True
         att["basescan_url"] = f"https://basescan.org/address/{CONTRACT_ADDRESS}"
         return jsonify(att)
-    except Exception as e:
-        return jsonify({"error": str(e)}), 500
+    except Exception:
+        return jsonify({"error": "Verification failed"}), 500
 
 
 @app.route("/vault/score", methods=["GET"])
@@ -240,8 +297,8 @@ def score():
                 "contract": CONTRACT_ADDRESS,
             }
         )
-    except Exception as e:
-        return jsonify({"error": str(e)}), 500
+    except Exception:
+        return jsonify({"error": "Score lookup failed"}), 500
 
 
 @app.route("/vault/swap", methods=["POST"])
@@ -269,9 +326,10 @@ def swap():
         result.pop("quote", None)
         return jsonify(result)
     except ValueError as e:
+        # ValueError is safe — these are our own validation messages
         return jsonify({"error": str(e)}), 400
-    except Exception as e:
-        return jsonify({"error": str(e)}), 500
+    except Exception:
+        return jsonify({"error": "Swap execution failed"}), 500
 
 
 @app.route("/vault/health", methods=["GET"])

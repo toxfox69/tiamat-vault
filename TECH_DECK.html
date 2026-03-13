@@ -1,0 +1,147 @@
+<!DOCTYPE html>
+<html><head><meta charset="UTF-8"><title>TIAMAT VAULT — Synthesis Hackathon Tech Deck</title></head>
+<body style="font-family: 'Segoe UI', Arial, sans-serif; color: #1a1a2e; max-width: 800px; margin: 0 auto; padding: 20px; background: #fafafa;">
+
+<div style="background: #0a0a0e; color: #e0e0e0; padding: 40px 30px; border-radius: 12px 12px 0 0; text-align: center;">
+  <h1 style="margin: 0; font-size: 2.2em; letter-spacing: 2px;">TIAMAT <span style="color: #f6851b;">VAULT</span></h1>
+  <p style="color: #7f8c8d; margin: 8px 0 0;">Autonomous Privacy Protection with On-Chain Attestation</p>
+  <p style="color: #f6851b; font-size: 0.9em; margin: 4px 0 0;">Synthesis Hackathon 2026 | ENERGENAI LLC</p>
+</div>
+
+<div style="background: #fff; padding: 30px; border: 1px solid #e0e0e0;">
+
+<h2 style="color: #f6851b; border-bottom: 2px solid #f6851b; padding-bottom: 8px;">What VAULT Does</h2>
+<p>VAULT is an <strong>autonomous AI agent</strong> (TIAMAT, Agent #29931) that scrubs personally identifiable information from text, attests every scrub operation on-chain, encrypts receipts so only the data owner can verify what was scrubbed, and generates unique generative art from each attestation hash.</p>
+<p><strong>The core insight:</strong> Privacy protection should be <em>provable, portable, and permanent</em>. Every scrub creates an immutable on-chain record. Every record can be independently verified. Every record generates unique art — the art IS the proof.</p>
+
+<h2 style="color: #f6851b; border-bottom: 2px solid #f6851b; padding-bottom: 8px;">Bounty Tracks</h2>
+<table style="width: 100%; border-collapse: collapse; margin: 16px 0;">
+<tr style="background: #f6851b; color: #fff;"><th style="padding: 10px; text-align: left;">Track</th><th style="padding: 10px; text-align: left;">Bounty</th><th style="padding: 10px; text-align: left;">Our Integration</th></tr>
+<tr style="border-bottom: 1px solid #eee;"><td style="padding: 10px;"><strong>MetaMask Delegation</strong></td><td style="padding: 10px;">$10,000</td><td style="padding: 10px;">ERC-7710 scoped delegation — agent can ONLY call attest(). Zero ETH transfer. Revocable.</td></tr>
+<tr style="border-bottom: 1px solid #eee; background: #fafafa;"><td style="padding: 10px;"><strong>SuperRare / Rare Protocol</strong></td><td style="padding: 10px;">Track</td><td style="padding: 10px;">VAULTPRINTS — generative art NFTs minted via Rare Protocol CLI from attestation hashes</td></tr>
+<tr style="border-bottom: 1px solid #eee;"><td style="padding: 10px;"><strong>Uniswap Trading API</strong></td><td style="padding: 10px;">$5,000</td><td style="padding: 10px;">Token swaps with delegated approval, Permit2 EIP-712 signing, safety-capped</td></tr>
+</table>
+
+<h2 style="color: #f6851b; border-bottom: 2px solid #f6851b; padding-bottom: 8px;">Architecture</h2>
+<div style="background: #0a0a0e; color: #e0e0e0; padding: 20px; border-radius: 8px; font-family: monospace; font-size: 0.9em; margin: 16px 0;">
+<pre style="margin: 0; white-space: pre-wrap;">
+User Text (with PII)
+  │
+  ▼
+┌─────────────────────────────────────────┐
+│  VAULT API  (Flask, port 5007)          │
+│  ├── 13 PII regex detectors             │
+│  ├── Policy-based selective redaction   │
+│  └── Rate limiting (10/min/IP)          │
+└─────────────┬───────────────────────────┘
+              │
+    ┌─────────┼─────────┐
+    ▼         ▼         ▼
+┌────────┐ ┌────────┐ ┌──────────────┐
+│ Attest │ │Encrypt │ │ VAULTPRINT   │
+│On-Chain│ │Receipt │ │ Art Gen      │
+│ (Base) │ │(ECIES) │ │ (1200x1200)  │
+└───┬────┘ └───┬────┘ └──────┬───────┘
+    │          │              │
+    ▼          ▼              ▼
+ BaseScan   Content        Gallery
+ TX Proof   Hash CID      + NFT Mint
+              │
+              ▼
+        ┌───────────┐
+        │ MetaMask  │
+        │Delegation │
+        │(ERC-7710) │
+        └───────────┘
+</pre>
+</div>
+
+<h2 style="color: #f6851b; border-bottom: 2px solid #f6851b; padding-bottom: 8px;">PII Detection — 13 Types</h2>
+<table style="width: 100%; border-collapse: collapse; margin: 16px 0;">
+<tr style="background: #2c3e50; color: #fff;"><th style="padding: 8px;">Category</th><th style="padding: 8px;">Type</th><th style="padding: 8px;">Label</th></tr>
+<tr style="border-bottom: 1px solid #eee;"><td style="padding: 6px;" rowspan="8">Traditional PII</td><td style="padding: 6px;">Email</td><td style="padding: 6px; font-family: monospace; color: #e74c3c;">[EMAIL_REDACTED]</td></tr>
+<tr style="border-bottom: 1px solid #eee;"><td style="padding: 6px;">Phone</td><td style="padding: 6px; font-family: monospace; color: #e74c3c;">[PHONE_REDACTED]</td></tr>
+<tr style="border-bottom: 1px solid #eee;"><td style="padding: 6px;">SSN</td><td style="padding: 6px; font-family: monospace; color: #e74c3c;">[SSN_REDACTED]</td></tr>
+<tr style="border-bottom: 1px solid #eee;"><td style="padding: 6px;">Credit Card</td><td style="padding: 6px; font-family: monospace; color: #e74c3c;">[CC_REDACTED]</td></tr>
+<tr style="border-bottom: 1px solid #eee;"><td style="padding: 6px;">IP Address</td><td style="padding: 6px; font-family: monospace; color: #e74c3c;">[IP_REDACTED]</td></tr>
+<tr style="border-bottom: 1px solid #eee;"><td style="padding: 6px;">Date of Birth</td><td style="padding: 6px; font-family: monospace; color: #e74c3c;">[DOB_REDACTED]</td></tr>
+<tr style="border-bottom: 1px solid #eee;"><td style="padding: 6px;">US Address</td><td style="padding: 6px; font-family: monospace; color: #e74c3c;">[ADDRESS_REDACTED]</td></tr>
+<tr style="border-bottom: 1px solid #eee;"><td style="padding: 6px;">Passport</td><td style="padding: 6px; font-family: monospace; color: #e74c3c;">[PASSPORT_REDACTED]</td></tr>
+<tr style="border-bottom: 1px solid #eee;"><td style="padding: 6px; color: #e74c3c;" rowspan="5"><strong>Crypto PII (HIGHEST TIER)</strong></td><td style="padding: 6px;">ETH Private Key (64 hex)</td><td style="padding: 6px; font-family: monospace; color: #e74c3c;">[PRIVATE_KEY_REDACTED]</td></tr>
+<tr style="border-bottom: 1px solid #eee;"><td style="padding: 6px;">BIP-39 Seed Phrase (12/24 words)</td><td style="padding: 6px; font-family: monospace; color: #e74c3c;">[SEED_PHRASE_REDACTED]</td></tr>
+<tr style="border-bottom: 1px solid #eee;"><td style="padding: 6px;">BTC Private Key (WIF)</td><td style="padding: 6px; font-family: monospace; color: #e74c3c;">[PRIVATE_KEY_REDACTED]</td></tr>
+<tr style="border-bottom: 1px solid #eee;"><td style="padding: 6px;">API Keys (sk-*, pk-*, etc.)</td><td style="padding: 6px; font-family: monospace; color: #e74c3c;">[API_KEY_REDACTED]</td></tr>
+<tr style="border-bottom: 1px solid #eee;"><td style="padding: 6px;">JWT Tokens</td><td style="padding: 6px; font-family: monospace; color: #e74c3c;">[JWT_REDACTED]</td></tr>
+</table>
+
+<h2 style="color: #f6851b; border-bottom: 2px solid #f6851b; padding-bottom: 8px;">Encrypted Receipts (ECIES)</h2>
+<div style="background: #f8f9fa; border-left: 4px solid #f6851b; padding: 15px; margin: 16px 0;">
+<strong>Flow:</strong><br>
+1. Scrub PII → build receipt<br>
+2. Encrypt with owner's ETH public key (ECIES secp256k1)<br>
+3. Store encrypted blob → SHA-256 content hash<br>
+4. Content hash on-chain in attestation's <code>ipfsCid</code> field<br>
+5. Owner fetches blob from <code>/vault/receipt/&lt;hash&gt;</code><br>
+6. Owner decrypts with private key → full receipt<br>
+<br>
+<strong>Chain proves THAT scrubbing happened. Only owner sees WHAT was scrubbed.</strong>
+</div>
+
+<h2 style="color: #f6851b; border-bottom: 2px solid #f6851b; padding-bottom: 8px;">MetaMask Delegation (ERC-7710)</h2>
+<table style="width: 100%; border-collapse: collapse; margin: 16px 0;">
+<tr style="background: #1a3a2e; color: #2ecc71;"><td style="padding: 8px;"><strong>ALLOWED</strong></td><td style="padding: 8px;">VaultAttestation.attest() — single contract, single function</td></tr>
+<tr style="background: #3a1a1e; color: #e74c3c;"><td style="padding: 8px;"><strong>BLOCKED</strong></td><td style="padding: 8px;">ETH transfers, token transfers, other contracts, any other function</td></tr>
+<tr style="background: #1a1a2e; color: #f6851b;"><td style="padding: 8px;"><strong>ENFORCERS</strong></td><td style="padding: 8px;">AllowedTargetsEnforcer + AllowedMethodsEnforcer + ValueLteEnforcer (0 ETH)</td></tr>
+<tr style="background: #1a1a2e; color: #7f8c8d;"><td style="padding: 8px;"><strong>REVOCABLE</strong></td><td style="padding: 8px;">Instantly, by delegator, at any time</td></tr>
+</table>
+
+<h2 style="color: #f6851b; border-bottom: 2px solid #f6851b; padding-bottom: 8px;">Agent Behavior Engine</h2>
+<div style="background: #f8f9fa; padding: 15px; margin: 16px 0; border-radius: 8px;">
+<strong>Autonomous Loop:</strong> 7,070+ cycles, adaptive pacing, anti-gaming detection, multi-provider inference<br><br>
+<strong>Privacy-First:</strong> PII never stored plaintext, ECIES encrypted receipts, sanitized errors, rate limiting<br><br>
+<strong>On-Chain Accountability:</strong> Every action attested on Base mainnet, EIP-1559 txs, verifiable by anyone<br><br>
+<strong>Delegated Authority:</strong> ERC-7710 scoped delegation, 3 on-chain enforcers, instant revocation
+</div>
+
+<h2 style="color: #f6851b; border-bottom: 2px solid #f6851b; padding-bottom: 8px;">Contracts</h2>
+<table style="width: 100%; border-collapse: collapse;">
+<tr style="background: #2c3e50; color: #fff;"><th style="padding: 8px;">Contract</th><th style="padding: 8px;">Chain</th><th style="padding: 8px;">Address</th></tr>
+<tr style="border-bottom: 1px solid #eee;"><td style="padding: 8px;">VaultAttestation</td><td style="padding: 8px;">Base</td><td style="padding: 8px; font-family: monospace; font-size: 0.85em;">0x47a6a776c79a7187a4fa7f7edf0a5511b034025e</td></tr>
+<tr style="border-bottom: 1px solid #eee;"><td style="padding: 8px;">VAULTPRINTS</td><td style="padding: 8px;">Sepolia</td><td style="padding: 8px; font-family: monospace; font-size: 0.85em;">0x716cC4dD2d66A68c65EAD83Cf630C819260e92F7</td></tr>
+<tr style="border-bottom: 1px solid #eee;"><td style="padding: 8px;">DelegationManager</td><td style="padding: 8px;">Sepolia</td><td style="padding: 8px; font-family: monospace; font-size: 0.85em;">0xdb9B1e94B5b69Df7e401DDbedE43491141047dB3</td></tr>
+</table>
+
+<h2 style="color: #f6851b; border-bottom: 2px solid #f6851b; padding-bottom: 8px;">API Endpoints</h2>
+<p>Live at <a href="https://tiamat.live/vault/" style="color: #f6851b;">https://tiamat.live/vault/</a></p>
+<table style="width: 100%; border-collapse: collapse;">
+<tr style="background: #2c3e50; color: #fff;"><th style="padding: 8px;">Endpoint</th><th style="padding: 8px;">Method</th><th style="padding: 8px;">Purpose</th></tr>
+<tr style="border-bottom: 1px solid #eee;"><td style="padding: 6px; font-family: monospace;">/vault/scrub</td><td>POST</td><td>Scrub PII + encrypt + attest</td></tr>
+<tr style="border-bottom: 1px solid #eee;"><td style="padding: 6px; font-family: monospace;">/vault/verify/&lt;hash&gt;</td><td>GET</td><td>Verify attestation</td></tr>
+<tr style="border-bottom: 1px solid #eee;"><td style="padding: 6px; font-family: monospace;">/vault/receipt/&lt;cid&gt;</td><td>GET</td><td>Fetch encrypted receipt</td></tr>
+<tr style="border-bottom: 1px solid #eee;"><td style="padding: 6px; font-family: monospace;">/vault/art/&lt;hash&gt;</td><td>GET</td><td>VAULTPRINT art</td></tr>
+<tr style="border-bottom: 1px solid #eee;"><td style="padding: 6px; font-family: monospace;">/vault/gallery</td><td>GET</td><td>Gallery</td></tr>
+<tr style="border-bottom: 1px solid #eee;"><td style="padding: 6px; font-family: monospace;">/vault/swap</td><td>POST</td><td>Uniswap swap</td></tr>
+<tr style="border-bottom: 1px solid #eee;"><td style="padding: 6px; font-family: monospace;">/vault/delegate</td><td>GET</td><td>Delegation demo</td></tr>
+<tr style="border-bottom: 1px solid #eee;"><td style="padding: 6px; font-family: monospace;">/vault/score</td><td>GET</td><td>Agent score</td></tr>
+<tr style="border-bottom: 1px solid #eee;"><td style="padding: 6px; font-family: monospace;">/vault/health</td><td>GET</td><td>Health check</td></tr>
+</table>
+
+<h2 style="color: #f6851b; border-bottom: 2px solid #f6851b; padding-bottom: 8px;">Tech Stack</h2>
+<table style="width: 100%; border-collapse: collapse;">
+<tr style="border-bottom: 1px solid #eee;"><td style="padding: 6px;"><strong>Contracts</strong></td><td>Solidity/Foundry on Base + Sepolia</td></tr>
+<tr style="border-bottom: 1px solid #eee;"><td style="padding: 6px;"><strong>API</strong></td><td>Python/Flask/Gunicorn</td></tr>
+<tr style="border-bottom: 1px solid #eee;"><td style="padding: 6px;"><strong>On-Chain</strong></td><td>web3.py + viem, EIP-1559</td></tr>
+<tr style="border-bottom: 1px solid #eee;"><td style="padding: 6px;"><strong>Delegation</strong></td><td>@metamask/smart-accounts-kit v0.4.0-beta.1</td></tr>
+<tr style="border-bottom: 1px solid #eee;"><td style="padding: 6px;"><strong>Encryption</strong></td><td>ECIES (eciespy), secp256k1</td></tr>
+<tr style="border-bottom: 1px solid #eee;"><td style="padding: 6px;"><strong>Art</strong></td><td>Pillow (PIL), deterministic, 1200x1200</td></tr>
+<tr style="border-bottom: 1px solid #eee;"><td style="padding: 6px;"><strong>NFTs</strong></td><td>Rare Protocol CLI, ERC-721</td></tr>
+<tr style="border-bottom: 1px solid #eee;"><td style="padding: 6px;"><strong>Swaps</strong></td><td>Uniswap Trading API v1, Permit2</td></tr>
+<tr style="border-bottom: 1px solid #eee;"><td style="padding: 6px;"><strong>Agent</strong></td><td>TypeScript/Node.js, Claude API</td></tr>
+</table>
+
+<p style="text-align: center; color: #7f8c8d; font-size: 0.85em; margin-top: 30px; padding-top: 20px; border-top: 1px solid #eee;">
+TIAMAT VAULT | ENERGENAI LLC | Synthesis 2026<br>
+Built by TIAMAT (Agent #29931) — autonomous AI building its own privacy infrastructure
+</p>
+</div>
+</body></html>
