@@ -334,7 +334,7 @@ def swap():
 
 @app.route("/vault/health", methods=["GET"])
 def health():
-    """Health check."""
+    """Health check — styled HTML for browsers, JSON for API clients."""
     try:
         score = get_agent_score()
         chain_ok = True
@@ -342,19 +342,80 @@ def health():
         score = None
         chain_ok = False
 
-    return jsonify(
-        {
-            "status": "ok",
-            "service": "tiamat-vault",
-            "agent_id": AGENT_ID,
-            "contract": CONTRACT_ADDRESS,
-            "chain_connected": chain_ok,
-            "agent_score": score,
-            "pii_types": list(PII_PATTERNS.keys()),
-            "swap_tokens": ["USDC", "WETH", "ETH"],
-            "max_swap_usdc": "5.00",
-        }
-    )
+    data = {
+        "status": "ok",
+        "service": "tiamat-vault",
+        "agent_id": AGENT_ID,
+        "contract": CONTRACT_ADDRESS,
+        "chain_connected": chain_ok,
+        "agent_score": score,
+        "pii_types": list(PII_PATTERNS.keys()),
+        "swap_tokens": ["USDC", "WETH", "ETH"],
+        "max_swap_usdc": "5.00",
+    }
+
+    # Return JSON for API clients (curl, fetch, etc.)
+    if "application/json" in request.headers.get("Accept", "") or request.args.get("json"):
+        return jsonify(data)
+
+    # Styled HTML for browsers
+    pii_traditional = [t for t in data["pii_types"] if t not in ("eth_private_key", "seed_phrase", "btc_private_key", "api_key", "jwt_token")]
+    pii_crypto = [t for t in data["pii_types"] if t in ("eth_private_key", "seed_phrase", "btc_private_key", "api_key", "jwt_token")]
+    chain_badge = '<span style="color:#2ecc71">CONNECTED</span>' if chain_ok else '<span style="color:#e74c3c">DISCONNECTED</span>'
+    status_badge = '<span style="color:#2ecc71">OPERATIONAL</span>' if data["status"] == "ok" else '<span style="color:#e74c3c">DOWN</span>'
+
+    return f'''<!DOCTYPE html>
+<html lang="en"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1.0">
+<title>VAULT Health</title>
+<style>
+*{{margin:0;padding:0;box-sizing:border-box}}
+body{{background:#0a0a0e;color:#e0e0e0;font-family:'JetBrains Mono','Fira Code',monospace;min-height:100vh}}
+.container{{max-width:900px;margin:0 auto;padding:40px 20px}}
+h1{{font-size:2em;color:#fff;margin-bottom:8px}}
+h1 span{{color:#f6851b}}
+.subtitle{{color:#7f8c8d;font-size:1em;margin-bottom:30px}}
+h2{{color:#f6851b;font-size:1.2em;margin:24px 0 12px;border-bottom:1px solid #1a1a2e;padding-bottom:6px}}
+.grid{{display:grid;grid-template-columns:1fr 1fr;gap:16px;margin:16px 0}}
+.card{{background:#12121a;border:1px solid #1a1a2e;border-radius:8px;padding:20px}}
+.card-label{{color:#7f8c8d;font-size:0.85em;margin-bottom:4px}}
+.card-value{{color:#fff;font-size:1.2em;font-weight:bold}}
+.pill{{display:inline-block;background:#1a1a2e;color:#f6851b;padding:4px 10px;border-radius:12px;font-size:0.8em;margin:3px}}
+.pill.crypto{{background:#3a1a1e;color:#e74c3c}}
+.footer{{margin-top:40px;padding-top:16px;border-top:1px solid #1a1a2e;color:#555;font-size:0.8em;text-align:center}}
+a{{color:#f6851b}}
+</style></head><body>
+<div class="container">
+<h1>VAULT <span>HEALTH</span></h1>
+<div class="subtitle">System status for TIAMAT VAULT — Agent #{data["agent_id"]}</div>
+
+<div class="grid">
+  <div class="card"><div class="card-label">Status</div><div class="card-value">{status_badge}</div></div>
+  <div class="card"><div class="card-label">Base Chain</div><div class="card-value">{chain_badge}</div></div>
+  <div class="card"><div class="card-label">Attestations</div><div class="card-value">{score or 0}</div></div>
+  <div class="card"><div class="card-label">Agent ID</div><div class="card-value">#{data["agent_id"]}</div></div>
+  <div class="card"><div class="card-label">Max Swap</div><div class="card-value">{data["max_swap_usdc"]} USDC</div></div>
+  <div class="card"><div class="card-label">Swap Tokens</div><div class="card-value">{" / ".join(data["swap_tokens"])}</div></div>
+</div>
+
+<h2>Contract</h2>
+<div class="card" style="word-break:break-all">
+  <div class="card-label">VaultAttestation (Base Mainnet)</div>
+  <div class="card-value" style="font-size:0.9em"><a href="https://basescan.org/address/{data["contract"]}" target="_blank">{data["contract"]}</a></div>
+</div>
+
+<h2>PII Detection — {len(data["pii_types"])} Types</h2>
+<div style="margin:12px 0">
+  {"".join(f'<span class="pill">{t}</span>' for t in pii_traditional)}
+</div>
+<div style="margin:12px 0">
+  {"".join(f'<span class="pill crypto">{t}</span>' for t in pii_crypto)}
+</div>
+
+<div class="footer">
+  <a href="/vault/">VAULT</a> | <a href="/vault/delegate">Delegate</a> | <a href="/vault/gallery">Gallery</a> | <a href="/vault/health?json=1">JSON</a>
+  <br>TIAMAT VAULT | <a href="https://tiamat.live">tiamat.live</a>
+</div>
+</div></body></html>'''
 
 
 @app.route("/vault/art/<receipt_hash_hex>", methods=["GET"])
