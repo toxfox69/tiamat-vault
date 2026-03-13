@@ -2,6 +2,7 @@
 
 Endpoints:
   POST /vault/scrub          — Scrub PII from text, attest on-chain
+  POST /vault/analyze        — Private PII analysis via Venice AI (no data retention)
   GET  /vault/verify/<hash>  — Verify attestation on-chain
   GET  /vault/score          — Agent attestation count
   GET  /vault/health         — Health check
@@ -12,6 +13,7 @@ Endpoints:
 """
 
 import io
+import json
 import re
 import time
 from collections import defaultdict
@@ -342,6 +344,9 @@ def health():
         score = None
         chain_ok = False
 
+    import os as _os
+    venice_ok = bool(_os.environ.get("VENICE_API_KEY"))
+
     data = {
         "status": "ok",
         "service": "tiamat-vault",
@@ -352,6 +357,7 @@ def health():
         "pii_types": list(PII_PATTERNS.keys()),
         "swap_tokens": ["USDC", "WETH", "ETH"],
         "max_swap_usdc": "5.00",
+        "venice_ai": venice_ok,
     }
 
     # Return JSON for API clients (curl, fetch, etc.)
@@ -463,6 +469,84 @@ def gallery():
 def tech_deck():
     """Serve the tech deck HTML."""
     return send_file("/root/vault/TECH_DECK.html", mimetype="text/html")
+
+
+# ─── VENICE AI — Private Inference (No Data Retention) ────────────────
+
+import urllib.request
+
+VENICE_API_URL = "https://api.venice.ai/api/v1/chat/completions"
+VENICE_ANALYSIS_PROMPT = """You are VAULT, a privacy analysis engine. Analyze the following text for privacy risks.
+For each risk found, classify it as: CRITICAL (keys, passwords, seeds), HIGH (SSN, credit cards), MEDIUM (email, phone), or LOW (names, addresses).
+Give a risk score 0-100 and specific recommendations. Be concise.
+Important: Do NOT repeat any sensitive data in your response. Reference items by type only."""
+
+
+@app.route("/vault/analyze", methods=["POST"])
+@rate_limit
+def venice_analyze():
+    """Private PII risk analysis via Venice AI — zero data retention.
+
+    Venice runs inference on decentralized infrastructure with no prompt logging
+    or data storage. The text is analyzed, risks identified, and nothing is retained.
+
+    Body: { "text": "text to analyze", "model": "llama-3.3-70b" (optional) }
+    """
+    import os as _os
+    venice_key = _os.environ.get("VENICE_API_KEY", "")
+    if not venice_key:
+        return jsonify({"error": "Venice API not configured"}), 503
+
+    data = request.get_json(silent=True)
+    if not data or "text" not in data:
+        return jsonify({"error": "Missing 'text' field"}), 400
+
+    text = data["text"]
+    if not isinstance(text, str) or len(text) == 0:
+        return jsonify({"error": "Text must be a non-empty string"}), 400
+
+    model = data.get("model", "llama-3.3-70b")
+
+    # Also run our regex detection
+    detected = detect_pii(text)
+
+    # Call Venice (private, no data retention)
+    payload = json.dumps({
+        "model": model,
+        "messages": [
+            {"role": "system", "content": VENICE_ANALYSIS_PROMPT},
+            {"role": "user", "content": f"Analyze this text for privacy risks:\n\n{text}"},
+        ],
+        "max_tokens": 500,
+        "temperature": 0.3,
+    }).encode()
+
+    req = urllib.request.Request(
+        VENICE_API_URL,
+        data=payload,
+        headers={
+            "Authorization": f"Bearer {venice_key}",
+            "Content-Type": "application/json",
+        },
+    )
+
+    try:
+        with urllib.request.urlopen(req, timeout=30) as resp:
+            venice_response = json.loads(resp.read())
+        analysis = venice_response["choices"][0]["message"]["content"]
+        venice_model = venice_response.get("model", model)
+    except Exception as e:
+        analysis = None
+        venice_model = None
+
+    return jsonify({
+        "regex_detection": {k: len(v) for k, v in detected.items()},
+        "pii_types_found": list(detected.keys()),
+        "venice_analysis": analysis,
+        "venice_model": venice_model,
+        "privacy_guarantee": "Venice AI — zero data retention, decentralized inference",
+        "data_retained": False,
+    })
 
 
 # ─── VAULT STORAGE — Safety Deposit Box for Agents ───────────────────
